@@ -1,8 +1,9 @@
-import { Sparkles, Armchair, Paintbrush, Leaf, Settings, Search } from 'lucide-react';
+import { Sparkles, Armchair, Paintbrush, Leaf, Settings, Search, UserCircle } from 'lucide-react';
 import type { Inventario } from '@/data/inventarios';
 
 interface MenuPrincipalProps {
   inventarios: Inventario[];
+  userName: string;
   onSelectInventario: (id: string) => void;
   onBuscar: () => void;
   onConfiguracion: () => void;
@@ -22,14 +23,14 @@ const colorMap: Record<string, string> = {
   nutriplus: 'var(--ios-green)',
 };
 
-export function MenuPrincipal({ inventarios, onSelectInventario, onBuscar, onConfiguracion }: MenuPrincipalProps) {
+export function MenuPrincipal({ inventarios, userName, onSelectInventario, onBuscar, onConfiguracion }: MenuPrincipalProps) {
   return (
     <div className="h-full flex flex-col animate-fadeIn">
       {/* Header */}
       <div className="shrink-0 pt-6 pb-4 px-5">
         <div className="flex items-center justify-between">
           <div>
-            <h1 
+            <h1
               className="text-2xl font-semibold tracking-tight"
               style={{ fontFamily: "'SF Pro Display', system-ui" }}
             >
@@ -39,13 +40,27 @@ export function MenuPrincipal({ inventarios, onSelectInventario, onBuscar, onCon
               Selecciona un inventario
             </p>
           </div>
-          <button
-            onClick={onConfiguracion}
-            className="btn-glass rounded-full p-3"
-            aria-label="Configuración"
-          >
-            <Settings size={20} strokeWidth={1.5} />
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Active user badge */}
+            <div
+              className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium"
+              style={{
+                background: 'var(--ios-surface)',
+                color: 'var(--ios-text-secondary)',
+                border: '1px solid var(--ios-border)',
+              }}
+            >
+              <UserCircle size={14} strokeWidth={1.5} />
+              <span>{userName}</span>
+            </div>
+            <button
+              onClick={onConfiguracion}
+              className="btn-glass rounded-full p-3"
+              aria-label="Configuración"
+            >
+              <Settings size={20} strokeWidth={1.5} />
+            </button>
+          </div>
         </div>
       </div>
 

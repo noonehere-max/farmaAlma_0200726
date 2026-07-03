@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { 
   ArrowLeft, Globe, Eye, RotateCcw, Moon, Sun, 
-  Type, MonitorSmartphone, Info, ChevronRight 
+  Type, MonitorSmartphone, Info, ChevronRight,
+  UserCircle, LogOut
 } from 'lucide-react';
 import {
   Dialog,
@@ -25,9 +26,11 @@ interface ConfiguracionProps {
   settings: AppSettings;
   onUpdateSettings: (settings: AppSettings) => void;
   onResetData: () => void;
+  userName: string;
+  onLogout: () => void;
 }
 
-export function Configuracion({ onBack, settings, onUpdateSettings, onResetData }: ConfiguracionProps) {
+export function Configuracion({ onBack, settings, onUpdateSettings, onResetData, userName, onLogout }: ConfiguracionProps) {
   const [confirmReset, setConfirmReset] = useState(false);
 
   useEffect(() => {
@@ -168,6 +171,27 @@ export function Configuracion({ onBack, settings, onUpdateSettings, onResetData 
 
       {/* Settings list */}
       <div className="flex-1 overflow-y-auto no-scrollbar">
+        {/* Cuenta */}
+        <SectionTitle>Cuenta</SectionTitle>
+        <div className="liquid-glass rounded-2xl mx-5 overflow-hidden">
+          <SettingRow
+            icon={<UserCircle size={16} strokeWidth={1.5} />}
+            label={userName}
+            description="Usuario activo"
+          />
+          <button
+            onClick={onLogout}
+            className="w-full text-left"
+          >
+            <SettingRow
+              icon={<LogOut size={16} strokeWidth={1.5} />}
+              label="Cerrar sesión"
+              description="Salir de la cuenta actual"
+              danger
+            />
+          </button>
+        </div>
+
         {/* General */}
         <SectionTitle>General</SectionTitle>
         <div className="liquid-glass rounded-2xl mx-5 overflow-hidden">
