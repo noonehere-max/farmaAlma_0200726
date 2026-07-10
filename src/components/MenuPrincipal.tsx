@@ -58,8 +58,6 @@ export function MenuPrincipal({
     inv.productos.forEach((prod, idx) => {
       if (prod.cantidad === 0) {
         notificaciones.push({ inventario: inv, producto: prod, index: idx, nivel: 'agotado' });
-      } else if (prod.cantidad <= 2) {
-        notificaciones.push({ inventario: inv, producto: prod, index: idx, nivel: 'pocos' });
       }
     });
   }
@@ -220,7 +218,7 @@ export function MenuPrincipal({
               className="liquid-glass rounded-2xl p-4 text-center text-sm"
               style={{ color: 'var(--ios-text-tertiary)' }}
             >
-              No hay productos sin stock ni con pocas unidades.
+              No hay productos agotados.
             </div>
           ) : (
             <div className="space-y-2">
