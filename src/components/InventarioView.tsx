@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, ChevronUp, ChevronDown } from 'lucide-react';
 import type { Inventario } from '@/data/inventarios';
 
 interface InventarioViewProps {
   inventario: Inventario;
+  selectedProductoIndex?: number;
   onBack: () => void;
   onUpdateCantidad: (inventarioId: string, productoIndex: number, delta: number) => void;
   onSetCantidad: (inventarioId: string, productoIndex: number, cantidad: number) => void;
@@ -11,10 +12,12 @@ interface InventarioViewProps {
 
 type SortMode = 'nombre' | 'cantidad' | 'cantidad-desc';
 
-export function InventarioView({ inventario, onBack, onUpdateCantidad, onSetCantidad }: InventarioViewProps) {
+export function InventarioView({ inventario, selectedProductoIndex, onBack, onUpdateCantidad, onSetCantidad }: InventarioViewProps) {
   const [sort, setSort] = useState<SortMode>('nombre');
   const [editandoIdx, setEditandoIdx] = useState<number | null>(null);
   const [editValor, setEditValor] = useState('');
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   const sortedProductos = [...inventario.productos].sort((a, b) => {
     switch (sort) {
@@ -23,6 +26,16 @@ export function InventarioView({ inventario, onBack, onUpdateCantidad, onSetCant
       default: return a.nombre.localeCompare(b.nombre);
     }
   });
+
+  useEffect(() => {
+    if (selectedProductoIndex == null) return;
+    const targetNombre = inventario.productos[selectedProductoIndex]?.nombre;
+    if (!targetNombre) return;
+    const el = itemRefs.current.get(targetNombre);
+    if (el && scrollRef.current) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [selectedProductoIndex, inventario.productos]);
 
   const handleStartEdit = (idx: number, cantidadActual: number) => {
     setEditandoIdx(idx);
@@ -96,7 +109,7 @@ export function InventarioView({ inventario, onBack, onUpdateCantidad, onSetCant
       </div>
 
       {/* Product list */}
-      <div className="flex-1 overflow-y-auto no-scrollbar px-5">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto no-scrollbar px-5">
         <div className="space-y-1 py-2">
           {sortedProductos.map((prod) => {
             const originalIdx = inventario.productos.findIndex(p => p.nombre === prod.nombre);
@@ -106,6 +119,7 @@ export function InventarioView({ inventario, onBack, onUpdateCantidad, onSetCant
             return (
               <div
                 key={prod.nombre}
+                ref={el => { if (el) itemRefs.current.set(prod.nombre, el); }}
                 className="grid grid-cols-[1fr_110px] items-center py-3 px-3 rounded-xl transition-colors hover:bg-[var(--ios-hover)]"
                 style={{ borderBottom: '1px solid var(--ios-border)' }}
               >

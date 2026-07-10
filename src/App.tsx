@@ -28,6 +28,7 @@ function getDisplayName(user: User | null): string {
 function App() {
   const [screen, setScreen] = useState<Screen>('bienvenida');
   const [selectedInventarioId, setSelectedInventarioId] = useState<string | null>(null);
+  const [selectedProductoIndex, setSelectedProductoIndex] = useState<number | null>(null);
   const [settings, setSettings] = useState<AppSettings>(() => {
     const saved = localStorage.getItem('farmasi_settings');
     return saved ? JSON.parse(saved) : DEFAULT_SETTINGS;
@@ -79,16 +80,19 @@ function App() {
 
   const handleSelectInventario = useCallback((id: string) => {
     setSelectedInventarioId(id);
+    setSelectedProductoIndex(null);
     setScreen('inventario');
   }, []);
 
   const handleBackToMenu = useCallback(() => {
     setSelectedInventarioId(null);
+    setSelectedProductoIndex(null);
     setScreen('menu');
   }, []);
 
-  const handleSelectResult = useCallback((inventarioId: string, _productoIndex: number) => {
+  const handleSelectResult = useCallback((inventarioId: string, productoIndex: number) => {
     setSelectedInventarioId(inventarioId);
+    setSelectedProductoIndex(productoIndex);
     setScreen('inventario');
   }, []);
 
@@ -187,6 +191,7 @@ function App() {
         {screen === 'inventario' && selectedInventario && (
           <InventarioView
             inventario={selectedInventario}
+            selectedProductoIndex={selectedProductoIndex ?? undefined}
             onBack={handleBackToMenu}
             onUpdateCantidad={updateCantidad}
             onSetCantidad={setCantidad}
