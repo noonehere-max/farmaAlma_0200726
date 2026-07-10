@@ -2,15 +2,18 @@ import { useState, useCallback, useEffect } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { useInventarios } from '@/hooks/useInventarios';
+import { useHistorial } from '@/hooks/useHistorial';
+import type { Producto } from '@/data/inventarios';
 import { Bienvenida } from '@/components/Bienvenida';
 import { MenuPrincipal } from '@/components/MenuPrincipal';
 import { InventarioView } from '@/components/InventarioView';
 import { Busqueda } from '@/components/Busqueda';
 import { Configuracion, type AppSettings } from '@/components/Configuracion';
+import { HistorialView } from '@/components/HistorialView';
 import { Login } from '@/components/Login';
 import './index.css';
 
-type Screen = 'bienvenida' | 'menu' | 'inventario' | 'busqueda' | 'configuracion';
+type Screen = 'bienvenida' | 'menu' | 'inventario' | 'busqueda' | 'configuracion' | 'historial';
 
 const DEFAULT_SETTINGS: AppSettings = {
   idioma: 'es',
@@ -39,13 +42,19 @@ function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
+  const userEmail = user?.email ?? null;
+  const { historial, addEntry, clearHistorial } = useHistorial(userEmail);
+
   const {
     inventarios,
     updateCantidad,
     setCantidad,
+    addProducto,
+    editProducto,
+    deleteProducto,
     buscarGlobal,
     resetInventarios,
-  } = useInventarios();
+  } = useInventarios(addEntry);
 
   // Persist settings
   useEffect(() => {
@@ -94,6 +103,46 @@ function App() {
     setSelectedInventarioId(inventarioId);
     setSelectedProductoIndex(productoIndex);
     setScreen('inventario');
+  }, []);
+
+  const handleSelectProducto = useCallback((inventarioId: string, productoIndex: number) => {
+    setSelectedInventarioId(inventarioId);
+    setSelectedProductoIndex(productoIndex);
+    setScreen('inventario');
+  }, []);
+
+  const handleAddProducto = useCallback(
+    async (inventarioId: string, producto: Producto) => {
+      await addProducto(inventarioId, producto);
+    },
+    [addProducto]
+  );
+
+  const handleEditProducto = useCallback(
+    async (
+      inventarioId: string,
+      productoIndex: number,
+      updates: Partial<Producto>,
+      nuevoInventarioId?: string
+    ) => {
+      await editProducto(inventarioId, productoIndex, updates, nuevoInventarioId);
+      if (nuevoInventarioId && nuevoInventarioId !== inventarioId) {
+        setSelectedInventarioId(nuevoInventarioId);
+        setSelectedProductoIndex(null);
+      }
+    },
+    [editProducto]
+  );
+
+  const handleDeleteProducto = useCallback(
+    async (inventarioId: string, productoIndex: number) => {
+      await deleteProducto(inventarioId, productoIndex);
+    },
+    [deleteProducto]
+  );
+
+  const handleHistorial = useCallback(() => {
+    setScreen('historial');
   }, []);
 
   const handleUpdateSettings = useCallback((newSettings: AppSettings) => {
@@ -183,18 +232,24 @@ function App() {
             inventarios={inventarios}
             userName={getDisplayName(user)}
             onSelectInventario={handleSelectInventario}
+            onSelectProducto={handleSelectProducto}
             onBuscar={() => setScreen('busqueda')}
             onConfiguracion={() => setScreen('configuracion')}
+            onHistorial={handleHistorial}
           />
         )}
 
         {screen === 'inventario' && selectedInventario && (
           <InventarioView
             inventario={selectedInventario}
+            inventarios={inventarios}
             selectedProductoIndex={selectedProductoIndex ?? undefined}
             onBack={handleBackToMenu}
             onUpdateCantidad={updateCantidad}
             onSetCantidad={setCantidad}
+            onAddProducto={handleAddProducto}
+            onEditProducto={handleEditProducto}
+            onDeleteProducto={handleDeleteProducto}
           />
         )}
 
@@ -215,6 +270,15 @@ function App() {
             onResetData={handleResetData}
             userName={getDisplayName(user)}
             onLogout={handleLogout}
+          />
+        )}
+
+        {screen === 'historial' && (
+          <HistorialView
+            historial={historial}
+            inventarios={inventarios}
+            onBack={handleBackToMenu}
+            onClear={clearHistorial}
           />
         )}
       </div>

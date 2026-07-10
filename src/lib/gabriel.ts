@@ -64,10 +64,6 @@ function findSimilarProducts(
     .map(({ producto, inventario }) => ({ producto, inventario }));
 }
 
-function countOutOfStock(results: { producto: Producto; inventario: Inventario }[]): number {
-  return results.filter(r => r.producto.cantidad === 0).length;
-}
-
 export function askGabriel(
   query: string,
   results: { producto: Producto; inventario: Inventario; index: number }[],
@@ -82,14 +78,13 @@ export function askGabriel(
       state: 'idle',
       message: `¡Hola! Soy Gabriel. Busca entre ${total} productos y te ayudo a encontrar lo que necesitas.`,
       suggestions: [
-        { label: 'Ver agotados', query: 'agotado' },
         { label: 'Skincare', query: 'skincare' },
         { label: 'Maquillaje', query: 'maquillaje' },
       ],
     };
   }
 
-  // Estado searching: texto pero aún no hay resultados (usado por el componente si lo desea)
+  // Estado searching: texto pero aún no hay resultados
   if (q.length > 0 && results.length === 0) {
     const similar = findSimilarProducts(q, inventarios);
     const detected = detectInventoryKeyword(q);
@@ -110,10 +105,11 @@ export function askGabriel(
       return {
         state: 'no-results',
         message: `Parece que buscas productos de ${INVENTORY_NAMES[detected]}. Prueba con una palabra más específica.`,
-        suggestions: inventarios
-          .find(inv => inv.id === detected)
-          ?.productos.slice(0, 3)
-          .map(p => ({ label: p.nombre, query: p.nombre })) ?? [],
+        suggestions:
+          inventarios
+            .find(inv => inv.id === detected)
+            ?.productos.slice(0, 3)
+            .map(p => ({ label: p.nombre, query: p.nombre })) ?? [],
       };
     }
 
@@ -131,14 +127,6 @@ export function askGabriel(
   // Estado results: hay resultados
   const count = results.length;
   const categories = Array.from(new Set(results.map(r => r.inventario.nombre)));
-  const outOfStock = countOutOfStock(results);
-
-  let insight: string | undefined;
-  if (outOfStock === count && count > 0) {
-    insight = 'Todos los resultados están agotados.';
-  } else if (outOfStock > 0) {
-    insight = `${outOfStock} producto${outOfStock > 1 ? 's' : ''} sin stock.`;
-  }
 
   const suggestions: GabrielSuggestion[] = [];
   if (categories.length > 1) {
@@ -152,6 +140,5 @@ export function askGabriel(
     state: 'results',
     message: `Encontré ${count} resultado${count !== 1 ? 's' : ''} en ${categories.length} inventario${categories.length !== 1 ? 's' : ''}.`,
     suggestions,
-    insight,
   };
 }

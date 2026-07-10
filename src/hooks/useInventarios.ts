@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { inventariosData, type Inventario, type Producto } from '@/data/inventarios';
+import type { HistorialEntry, HistorialCambio } from '@/hooks/useHistorial';
 
 interface ProductoRow {
   id: number;
@@ -61,7 +62,9 @@ function inventariosToRows(inventarios: Inventario[]): Omit<ProductoRow, 'id'>[]
   return rows;
 }
 
-export function useInventarios() {
+export function useInventarios(
+  onLog?: (entry: Omit<HistorialEntry, 'id' | 'fecha' | 'usuario'>) => void
+) {
   const [inventarios, setInventarios] = useState<Inventario[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -91,7 +94,6 @@ export function useInventarios() {
     } catch (err) {
       console.error('Error cargando inventarios:', err);
       setError('No se pudieron cargar los inventarios.');
-      // Fallback a datos locales si Supabase falla
       setInventarios(inventariosData);
     } finally {
       setLoading(false);
@@ -104,19 +106,14 @@ export function useInventarios() {
     if (seedError) throw seedError;
   };
 
-  // Carga inicial + realtime
   useEffect(() => {
     fetchInventarios();
 
     const channel = supabase
       .channel('productos-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'productos' },
-        () => {
-          fetchInventarios();
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'productos' }, () => {
+        fetchInventarios();
+      })
       .subscribe();
 
     return () => {
@@ -124,14 +121,46 @@ export function useInventarios() {
     };
   }, [fetchInventarios]);
 
+  const log = useCallback(
+    (entry: Omit<HistorialEntry, 'id' | 'fecha' | 'usuario'>) => {
+      if (onLog) onLog(entry);
+    },
+    [onLog]
+  );
+
   const updateProducto = useCallback(
-    async (inventarioId: string, productoIndex: number, updates: Partial<Producto>) => {
+    async (
+      inventarioId: string,
+      productoIndex: number,
+      updates: Partial<Producto>,
+      oldNombre?: string
+    ) => {
       const inv = inventarios.find(i => i.id === inventarioId);
       if (!inv) return;
       const producto = inv.productos[productoIndex];
       if (!producto) return;
 
-      // Actualización optimista local
+      const cambios: HistorialCambio[] = [];
+      if (updates.cantidad !== undefined && updates.cantidad !== producto.cantidad) {
+        cambios.push({ campo: 'cantidad', anterior: String(producto.cantidad), nuevo: String(updates.cantidad) });
+      }
+      if (updates.costoFI !== undefined && updates.costoFI !== producto.costoFI) {
+        cambios.push({ campo: 'costo tienda', anterior: producto.costoFI, nuevo: updates.costoFI });
+      }
+      if (updates.precioPublico !== undefined && updates.precioPublico !== producto.precioPublico) {
+        cambios.push({ campo: 'precio cliente', anterior: producto.precioPublico, nuevo: updates.precioPublico });
+      }
+      if (updates.nombre !== undefined && updates.nombre !== producto.nombre) {
+        const nombreNormalizado = updates.nombre.trim().toLowerCase();
+        const duplicado = inv.productos.some(
+          (p, idx) => idx !== productoIndex && p.nombre.trim().toLowerCase() === nombreNormalizado
+        );
+        if (duplicado) {
+          throw new Error(`Ya existe "${updates.nombre}" en ${inv.nombre}`);
+        }
+        cambios.push({ campo: 'nombre', anterior: producto.nombre, nuevo: updates.nombre });
+      }
+
       setInventarios(prev =>
         prev.map(i => {
           if (i.id !== inventarioId) return i;
@@ -141,24 +170,32 @@ export function useInventarios() {
         })
       );
 
-      // Persistir en Supabase
+      const nombreWhere = oldNombre ?? producto.nombre;
+
       const { error: updateError } = await supabase
         .from('productos')
         .update({
+          nombre: updates.nombre ?? producto.nombre,
           cantidad: updates.cantidad ?? producto.cantidad,
           costo_fi: updates.costoFI ?? producto.costoFI,
           precio_publico: updates.precioPublico ?? producto.precioPublico,
         })
         .eq('inventario_id', inventarioId)
-        .eq('nombre', producto.nombre);
+        .eq('nombre', nombreWhere);
 
       if (updateError) {
         console.error('Error actualizando producto:', updateError);
-        // Revertir si falla
         fetchInventarios();
+      } else if (cambios.length > 0) {
+        log({
+          accion: 'editar',
+          inventarioId,
+          productoNombre: updates.nombre ?? producto.nombre,
+          cambios,
+        });
       }
     },
-    [inventarios, fetchInventarios]
+    [inventarios, fetchInventarios, log]
   );
 
   const updateCantidad = useCallback(
@@ -185,12 +222,208 @@ export function useInventarios() {
     [updateProducto]
   );
 
+  const addProducto = useCallback(
+    async (inventarioId: string, producto: Producto) => {
+      const inv = inventarios.find(i => i.id === inventarioId);
+      if (!inv) throw new Error('Catálogo no encontrado');
+
+      const nombreNormalizado = producto.nombre.trim().toLowerCase();
+      const duplicado = inv.productos.some(
+        p => p.nombre.trim().toLowerCase() === nombreNormalizado
+      );
+      if (duplicado) {
+        throw new Error(`Ya existe "${producto.nombre}" en ${inv.nombre}`);
+      }
+
+      const nextOrden = inv.productos.length;
+
+      setInventarios(prev =>
+        prev.map(i => (i.id === inventarioId ? { ...i, productos: [...i.productos, producto] } : i))
+      );
+
+      const { error: insertError } = await supabase.from('productos').insert({
+        inventario_id: inventarioId,
+        nombre: producto.nombre,
+        cantidad: producto.cantidad,
+        costo_fi: producto.costoFI,
+        precio_publico: producto.precioPublico,
+        orden: nextOrden,
+      });
+
+      if (insertError) {
+        console.error('Error añadiendo producto:', insertError);
+        fetchInventarios();
+        throw new Error('No se pudo guardar el producto');
+      }
+
+      log({
+        accion: 'crear',
+        inventarioId,
+        productoNombre: producto.nombre,
+        cambios: [
+          { campo: 'nombre', anterior: '', nuevo: producto.nombre },
+          { campo: 'cantidad', anterior: '', nuevo: String(producto.cantidad) },
+          { campo: 'costo tienda', anterior: '', nuevo: producto.costoFI },
+          { campo: 'precio cliente', anterior: '', nuevo: producto.precioPublico },
+        ],
+      });
+    },
+    [inventarios, fetchInventarios, log]
+  );
+
+  const deleteProducto = useCallback(
+    async (inventarioId: string, productoIndex: number) => {
+      const inv = inventarios.find(i => i.id === inventarioId);
+      if (!inv) return;
+      const producto = inv.productos[productoIndex];
+      if (!producto) return;
+
+      setInventarios(prev =>
+        prev.map(i =>
+          i.id === inventarioId
+            ? { ...i, productos: i.productos.filter((_, idx) => idx !== productoIndex) }
+            : i
+        )
+      );
+
+      const { error: deleteError } = await supabase
+        .from('productos')
+        .delete()
+        .eq('inventario_id', inventarioId)
+        .eq('nombre', producto.nombre);
+
+      if (deleteError) {
+        console.error('Error eliminando producto:', deleteError);
+        fetchInventarios();
+      } else {
+        log({
+          accion: 'eliminar',
+          inventarioId,
+          productoNombre: producto.nombre,
+          cambios: [{ campo: 'eliminado', anterior: producto.nombre, nuevo: '' }],
+        });
+      }
+    },
+    [inventarios, fetchInventarios, log]
+  );
+
+  const moveProducto = useCallback(
+    async (
+      inventarioIdOrigen: string,
+      productoIndex: number,
+      inventarioIdDestino: string,
+      updates?: Partial<Producto>
+    ) => {
+      if (inventarioIdOrigen === inventarioIdDestino) return;
+      const origen = inventarios.find(i => i.id === inventarioIdOrigen);
+      const destino = inventarios.find(i => i.id === inventarioIdDestino);
+      if (!origen || !destino) return;
+
+      const producto = origen.productos[productoIndex];
+      if (!producto) return;
+
+      const productoFinal = { ...producto, ...updates };
+
+      const nombreNormalizado = productoFinal.nombre.trim().toLowerCase();
+      const duplicado = destino.productos.some(
+        p => p.nombre.trim().toLowerCase() === nombreNormalizado
+      );
+      if (duplicado) {
+        throw new Error(`Ya existe "${productoFinal.nombre}" en ${destino.nombre}`);
+      }
+
+      setInventarios(prev =>
+        prev.map(i => {
+          if (i.id === inventarioIdOrigen) {
+            return { ...i, productos: i.productos.filter((_, idx) => idx !== productoIndex) };
+          }
+          if (i.id === inventarioIdDestino) {
+            return { ...i, productos: [...i.productos, productoFinal] };
+          }
+          return i;
+        })
+      );
+
+      const nextOrden = destino.productos.length;
+
+      // Mover en Supabase: eliminar de origen e insertar en destino
+      const { error: deleteError } = await supabase
+        .from('productos')
+        .delete()
+        .eq('inventario_id', inventarioIdOrigen)
+        .eq('nombre', producto.nombre);
+
+      if (deleteError) {
+        console.error('Error moviendo producto (delete):', deleteError);
+        fetchInventarios();
+        throw new Error('No se pudo mover el producto');
+      }
+
+      const { error: insertError } = await supabase.from('productos').insert({
+        inventario_id: inventarioIdDestino,
+        nombre: productoFinal.nombre,
+        cantidad: productoFinal.cantidad,
+        costo_fi: productoFinal.costoFI,
+        precio_publico: productoFinal.precioPublico,
+        orden: nextOrden,
+      });
+
+      if (insertError) {
+        console.error('Error moviendo producto (insert):', insertError);
+        fetchInventarios();
+        throw new Error('No se pudo mover el producto');
+      }
+
+      const cambios: HistorialCambio[] = [
+        { campo: 'catálogo', anterior: origen.nombre, nuevo: destino.nombre },
+      ];
+      if (updates?.nombre !== undefined && updates.nombre !== producto.nombre) {
+        cambios.push({ campo: 'nombre', anterior: producto.nombre, nuevo: updates.nombre });
+      }
+      if (updates?.cantidad !== undefined && updates.cantidad !== producto.cantidad) {
+        cambios.push({ campo: 'cantidad', anterior: String(producto.cantidad), nuevo: String(updates.cantidad) });
+      }
+      if (updates?.costoFI !== undefined && updates.costoFI !== producto.costoFI) {
+        cambios.push({ campo: 'costo tienda', anterior: producto.costoFI, nuevo: updates.costoFI });
+      }
+      if (updates?.precioPublico !== undefined && updates.precioPublico !== producto.precioPublico) {
+        cambios.push({ campo: 'precio cliente', anterior: producto.precioPublico, nuevo: updates.precioPublico });
+      }
+
+      log({
+        accion: 'mover',
+        inventarioId: inventarioIdDestino,
+        productoNombre: productoFinal.nombre,
+        cambios,
+      });
+    },
+    [inventarios, fetchInventarios, log]
+  );
+
+  const editProducto = useCallback(
+    async (
+      inventarioId: string,
+      productoIndex: number,
+      updates: Partial<Producto>,
+      nuevoInventarioId?: string
+    ) => {
+      const inv = inventarios.find(i => i.id === inventarioId);
+      const producto = inv?.productos[productoIndex];
+      if (!producto) return;
+
+      if (nuevoInventarioId && nuevoInventarioId !== inventarioId) {
+        await moveProducto(inventarioId, productoIndex, nuevoInventarioId, updates);
+        return;
+      }
+      await updateProducto(inventarioId, productoIndex, updates, producto.nombre);
+    },
+    [inventarios, moveProducto, updateProducto]
+  );
+
   const getProductoByName = useCallback(
     (nombre: string): { producto: Producto; inventario: Inventario; index: number } | null => {
       for (const inv of inventarios) {
-        const idx = inv.productos.findIndex(p =>
-          p.nombre.toLowerCase().includes(nombre.toLowerCase())
-        );
+        const idx = inv.productos.findIndex(p => p.nombre.toLowerCase().includes(nombre.toLowerCase()));
         if (idx !== -1) {
           return { producto: inv.productos[idx], inventario: inv, index: idx };
         }
@@ -240,6 +473,10 @@ export function useInventarios() {
     updateCantidad,
     setCantidad,
     updatePrecio,
+    addProducto,
+    editProducto,
+    deleteProducto,
+    moveProducto,
     getProductoByName,
     buscarGlobal,
     resetInventarios,
